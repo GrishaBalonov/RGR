@@ -3,6 +3,7 @@ import asyncio
 import nest_asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from datetime import datetime
 
 # Применяем nest_asyncio
 nest_asyncio.apply()
@@ -11,7 +12,7 @@ nest_asyncio.apply()
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Хранилище для заявок (можно заменить на базу данных)
+# Хранилище для заявок
 applications = {}
 
 # Команда /start
@@ -20,20 +21,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Обработка заявок
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.message.from_user.id
     user_text = update.message.text
-    # Здесь следует добавить проверку и валидацию данных
-    applications[update.message.from_user.id] = user_text  # Сохраняем заявку по user_id
+    # Валидация ввода
+    if not user_text.strip():
+        await update.message.reply_text("Ошибка: Заявка не может быть пустой.")
+        return
+    # Сохраняем заявку с пометкой о статусе "принята"
+    applications[user_id] = {
+        "text": user_text,
+        "status": "Принята",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
     await update.message.reply_text(f'Ваша заявка "{user_text}" принята!')
 
-# Команда для просмотра статуса заявки
-async def check_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    status = applications.get(update.message.from_user.id, "У вас нет поданной заявки.")
-    await update.message.reply_text(f'Статус вашей заявки: {status}')
+# Команда для проверки статуса заявки
+async def check_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    application = applications.get(update.message.from_user.id, None)
+    if application:
+        status = application["status"]
+        timestamp = application["timestamp"]
+        await update.message.reply_text(f'Статус вашей заявки: {status}. Заявка: {application["text"]}. Дата подачи: {timestamp}.')
+    else:
+        await update.message.reply_text("У вас нет поданной заявки.")
 
-# Команда для просмотра всех заявок (для администраторов)
-async def view_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    all_apps = "\n".join(applications.values())
-    await update.message.reply_text(f'Все заявки:\n{all_apps}')
+# Команда для отмены заявки
+async def cancel_application(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.message.from_user.id
+    if user_id in applications:
+        del applications[user_id]
+        await update.message.reply_text("Ваша заявка была отменена.")
+    else:
+        await update.message.reply_text("У вас нет поданной заявки для отмены.")
+
+# Команда для просмотра всех заявок
+async def view_applications(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.message.from_user.id
+    user_apps = [f'Заявка: "{app["text"]}", Статус: {app["status"]}, Дата подачи: {app["timestamp"]}'
+                 for app in applications.values() if user_id in applications]
+    if user_apps:
+        await update.message.reply_text("\n".join(user_apps))
+    else:
+        await update.message.reply_text("У вас нет поданных заявок.")
 
 # Функция для запуска бота
 async def main() -> None:
@@ -44,7 +73,8 @@ async def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CommandHandler("status", check_status))
-    app.add_handler(CommandHandler("view_apps", view_applications))  # Для администраторов
+    app.add_handler(CommandHandler("cancel", cancel_application))
+    app.add_handler(CommandHandler("view_apps", view_applications))
 
     # Запускаем бота
     await app.run_polling()
